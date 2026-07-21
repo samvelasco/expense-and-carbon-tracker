@@ -84,7 +84,7 @@ capture_method = st.radio("How would you like to add a receipt?",
                            ["Upload a photo", "Use camera"])
 
 if capture_method == "Upload a photo":
-    photo = st.file_uploader("Upload a receipt image", type=["jpg", "jpeg", "png"])
+    photo = st.file_uploader("Upload a receipt image", type=["jpg", "jpeg", "png", "pdf"])
 else:
     photo = st.camera_input("Take a photo of your receipt")
 
