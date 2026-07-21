@@ -78,8 +78,15 @@ def extract_receipt_data(image_bytes):
 # ---------------- The actual page ----------------
 st.title("Tracker")
 
-workspace = st.selectbox("Workspace", ["Personal", "genCLEO"])
-photo = st.camera_input("Take a photo of your receipt")
+workspace = st.selectbox("Workspace", ["Personal", "Organization"])
+
+capture_method = st.radio("How would you like to add a receipt?",
+                           ["Upload a photo", "Use camera"])
+
+if capture_method == "Upload a photo":
+    photo = st.file_uploader("Upload a receipt image", type=["jpg", "jpeg", "png"])
+else:
+    photo = st.camera_input("Take a photo of your receipt")
 
 if photo is not None:
     with st.spinner("Reading receipt..."):
