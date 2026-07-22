@@ -84,7 +84,7 @@ capture_method = st.radio("How would you like to add a receipt?",
                            ["Upload a photo", "Use camera"])
 
 if capture_method == "Upload a photo":
-    photo = st.file_uploader("Upload a receipt image", type=["jpg", "jpeg", "png", "pdf"])
+    photo = st.file_uploader("Upload a receipt image", type=["jpg", "jpeg", "png"])
 else:
     photo = st.camera_input("Take a photo of your receipt")
 
@@ -94,18 +94,34 @@ if photo is not None:
         data = extract_receipt_data(image_bytes)
         clean_merchant = normalize_merchant(data.get("merchant", "Unknown"))
 
-    st.success("Here's what I found — check it over before saving:")
-    st.write(data)
+st.success("Here's what I found — edit anything that looks off:")
+
+    edited_merchant = st.text_input("Merchant", value=clean_merchant)
+    edited_date = st.text_input("Date (YYYY-MM-DD)", value=data.get("date", ""))
+    edited_category = st.selectbox(
+        "Category",
+        ["Groceries", "Dining", "Transportation", "Utilities",
+         "Shopping", "Entertainment", "Health", "Travel", "Other"],
+        index=["Groceries", "Dining", "Transportation", "Utilities",
+               "Shopping", "Entertainment", "Health", "Travel", "Other"]
+              .index(data.get("category", "Other"))
+              if data.get("category") in ["Groceries", "Dining", "Transportation",
+                                            "Utilities", "Shopping", "Entertainment",
+                                            "Health", "Travel", "Other"] else 8
+    )
+    edited_total = st.number_input("Total ($)", value=float(data.get("total", 0) or 0))
+    edited_carbon = st.number_input("Estimated carbon (kg CO2)",
+                                     value=float(data.get("estimated_carbon_kg", 0) or 0))
 
     if st.button("Save to sheet"):
-        sheet = get_sheet()
+sheet = get_sheet()
         sheet.append_row([
-            data.get("date", ""),
+            edited_date,
             workspace,
-            clean_merchant,
-            data.get("category", ""),
-            data.get("total", ""),
-            data.get("estimated_carbon_kg", ""),
+            edited_merchant,
+            edited_category,
+            edited_total,
+            edited_carbon,
             "",  # Submitted By — filled in once we add login
             "",  # Status — used later for entity approval
             data.get("payment_method", ""),
