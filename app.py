@@ -5,6 +5,7 @@ from groq import Groq
 import json
 import base64
 from datetime import datetime
+import fitz
 
 st.set_page_config(page_title="Tracker")
 
@@ -84,13 +85,25 @@ capture_method = st.radio("How would you like to add a receipt?",
                            ["Upload a photo", "Use camera"])
 
 if capture_method == "Upload a photo":
-    photo = st.file_uploader("Upload a receipt image", type=["jpg", "jpeg", "png"])
+    photo = st.file_uploader("Upload a receipt image or PDF",
+                              type=["jpg", "jpeg", "png", "pdf"])
 else:
     photo = st.camera_input("Take a photo of your receipt")
 
+def pdf_first_page_to_image_bytes(pdf_bytes):
+    """Opens a PDF and turns its first page into a PNG image, in memory."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    page = doc.load_page(0)
+    pix = page.get_pixmap(dpi=200)  # 200 dpi keeps text sharp enough to read
+    return pix.tobytes("png")
+
 if photo is not None:
     with st.spinner("Reading receipt..."):
-        image_bytes = photo.getvalue()
+        raw_bytes = photo.getvalue()
+        if photo.name.lower().endswith(".pdf"):
+            image_bytes = pdf_first_page_to_image_bytes(raw_bytes)
+        else:
+            image_bytes = raw_bytes
         data = extract_receipt_data(image_bytes)
         clean_merchant = normalize_merchant(data.get("merchant", "Unknown"))
 
