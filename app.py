@@ -21,7 +21,7 @@ def get_sheet():
 
 EXPECTED_HEADERS = [
     "Date", "Merchant", "Category", "Total ($)", "Est. Carbon (kg CO2)",
-    "Submitted By", "Payment Method", "Notes", "Receipt Link", "Raw Extract"
+    "Submitted By", "Payment Method", "Notes", "Raw Extract"
 ]
 
 def check_headers(sheet):
@@ -228,7 +228,6 @@ if photo is not None:
             submitted_by.strip(),
             data.get("payment_method", ""),
             notes.strip(),
-            "",  # Receipt Link
             json.dumps(data),  # Raw Extract, our safety net
         ])
         st.success("Saved!")
