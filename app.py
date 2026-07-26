@@ -19,6 +19,25 @@ def get_sheet():
     client = gspread.authorize(creds)
     return client.open_by_key(st.secrets["sheet_id"]).sheet1
 
+EXPECTED_HEADERS = [
+    "Date", "Merchant", "Category", "Total ($)", "Est. Carbon (kg CO2)",
+    "Submitted By", "Status", "Payment Method", "Notes", "Receipt Link", "Raw Extract"
+]
+
+def check_headers(sheet):
+    """Confirms the sheet's header row matches what append_row() actually writes.
+    Without this, a stale or edited header silently misaligns every column —
+    exactly what happened when the old 'Workspace' column was left in place."""
+    actual = sheet.row_values(1)
+    if actual != EXPECTED_HEADERS:
+        st.error(
+            "Sheet header row doesn't match what this app writes — saving is "
+            "disabled until this is fixed, to avoid silently misaligning columns.\n\n"
+            f"Expected: {EXPECTED_HEADERS}\n\nFound: {actual}"
+        )
+        return False
+    return True
+
 # ---- Connect to Groq (the AI that reads the receipt) ----
 # Note: qwen/qwen3.6-27b is currently flagged by Groq as a preview vision
 # model (evaluation, not production-guaranteed). Check console.groq.com/docs/vision
@@ -194,8 +213,10 @@ if photo is not None:
     if name_missing:
         st.caption(":red[Enter your name above before saving.]")
 
-    if st.button("Save to sheet", disabled=name_missing):
-        sheet = get_sheet()
+    sheet = get_sheet()
+    headers_ok = check_headers(sheet)
+
+    if st.button("Save to sheet", disabled=name_missing or not headers_ok):
         sheet.append_row([
             edited_date,
             edited_merchant,
