@@ -21,7 +21,7 @@ def get_sheet():
 
 EXPECTED_HEADERS = [
     "Date", "Merchant", "Category", "Total ($)", "Est. Carbon (kg CO2)",
-    "Submitted By", "Status", "Payment Method", "Notes", "Receipt Link", "Raw Extract"
+    "Submitted By", "Payment Method", "Notes", "Receipt Link", "Raw Extract"
 ]
 
 def check_headers(sheet):
@@ -201,6 +201,8 @@ if photo is not None:
     edited_total = st.number_input("Total ($)", value=safe_float(data.get("total")))
     submitted_by = st.text_input("Your name *", value="",
                                   help="Required — so the weekly digest can show who submitted what.")
+    notes = st.text_input("Notes (optional)", value="",
+                           placeholder="e.g. which program this supports, why it was purchased")
 
     carbon_estimate = estimate_carbon_kg(edited_category, edited_total)
     if carbon_estimate is not None:
@@ -224,9 +226,8 @@ if photo is not None:
             edited_total,
             carbon_estimate if carbon_estimate is not None else "",
             submitted_by.strip(),
-            "",  # Status — used later for approval workflow
             data.get("payment_method", ""),
-            "",  # Notes
+            notes.strip(),
             "",  # Receipt Link
             json.dumps(data),  # Raw Extract, our safety net
         ])
