@@ -14,7 +14,7 @@ This was built for an environmental nonprofit, but the it can be easily generali
 bookkeeping or reimbursement tracking for any small team. The carbon-estimate
 layer is just one thing to drop if it's not relevant to your use case.
 
-**Live app:** _add your Streamlit Community Cloud URL here once deployed_
+**Live app:** (https://expense-and-carbon-tracker-qnw8vchs2nksvnigae3nd5.streamlit.app/)
 
 
 ## How it works
