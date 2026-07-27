@@ -7,9 +7,9 @@ import base64
 import hashlib
 import fitz
 
-st.set_page_config(page_title="Receipt Tracker", page_icon="🌿", layout="centered")
+st.set_page_config(page_title="Receipt Tracker", layout="centered")
 
-# ---- Connect to Google Sheets (using the robot account) ----
+#Connect to Google Sheets
 @st.cache_resource
 def get_sheet():
     scopes = ["https://www.googleapis.com/auth/spreadsheets",
@@ -39,14 +39,10 @@ def check_headers(sheet):
         return False
     return True
 
-# ---- Connect to Groq (the AI that reads the receipt) ----
-# Note: qwen/qwen3.6-27b is currently flagged by Groq as a preview vision
-# model (evaluation, not production-guaranteed). Check console.groq.com/docs/vision
-# before relying on it long-term, and have a fallback model ready.
+#Connect to Groq qwen/qwen3.6-27b
 groq_client = Groq(api_key=st.secrets["groq_api_key"])
 
-# A small lookup table for common merchant name cleanup.
-# We'll expand this over time as you see more variations.
+#A small lookup table for common merchant name cleanup.
 MERCHANT_ALIASES = {
     "starbucks": "Starbucks",
     "sbux": "Starbucks",
@@ -58,35 +54,18 @@ MERCHANT_ALIASES = {
     "exxon": "Exxon",
 }
 
-# ---- Carbon estimation: spend-based emission factors ----
-# Methodology: EPA Supply Chain Greenhouse Gas Emission Factors v1.3 (USEEIO model),
-# published for Scope 3 spend-based GHG accounting. Free public dataset:
-# https://catalog.data.gov/dataset/supply-chain-greenhouse-gas-emission-factors-v1-3-by-naics-6
-# Values below are the "Supply Chain Emission Factors with Margins" (kg CO2e per
-# 2022 USD, purchaser price) for the NAICS-6 industry that best matches each
-# receipt category. Source NAICS code / title noted per line.
-#
-# KNOWN GAPS (deliberately left out rather than guessed):
-# - "Utilities": the EPA dataset excludes electricity entirely (per its own
-#   documentation, factors are given for all commodities "except electricity,
-#   government, and households"). A power bill needs a different source
-#   (e.g. EPA eGRID grid-average kg CO2/kWh factors) — not wired in yet.
-# - "Travel" is a genuinely rough bucket: a hotel night (~0.145 kg/$) and a
-#   flight (~0.644 kg/$, over 4x higher) get averaged into one number here.
-#   Splitting into "Lodging" vs "Flights" would be a good next iteration.
+#Carbon estimation: spend-based emission factors
+# Methodology: EPA Supply Chain Greenhouse Gas Emission Factors v1.3 (USEEIO model)
 CARBON_FACTORS_KG_PER_DOLLAR = {
     "Groceries": 0.186,       # NAICS 445110, Supermarkets and Other Grocery Stores
-    "Dining": 0.22,           # blend of NAICS 722511 (Full-Service, 0.194) and
-                              # 722513 (Limited-Service, 0.255) restaurants
+    "Dining": 0.22,           # blend of NAICS 722511 (Full-Service, 0.194) and 722513 (Limited-Service, 0.255) restaurants
     "Transportation": 0.183,  # NAICS 447110, Gasoline Stations w/ Convenience Stores
-    "Utilities": None,        # not available — electricity excluded from this dataset
+    "Utilities": None,        # not available; electricity excluded 
     "Shopping": 0.164,        # NAICS 452210/452311, Department Stores / Warehouse Clubs
-    "Entertainment": 0.20,    # blend of NAICS 713940 (Fitness Centers, 0.235) and
-                              # 713110 (Amusement Parks, 0.167)
+    "Entertainment": 0.20,    # blend of NAICS 713940 (Fitness Centers, 0.235) and 713110 (Amusement Parks, 0.167)
     "Health": 0.13,           # NAICS 446110, Pharmacies and Drug Stores
-    "Travel": 0.145,          # NAICS 721110, Hotels and Motels — see caveat above;
-                              # a flight would be closer to 0.644
-    "Other": None,            # no defensible category-level factor -> leave blank, don't guess
+    "Travel": 0.145,          # NAICS 721110, Hotels and Motels; a flight would be closer to 0.644
+    "Other": None,            # no defensible category-level factor -> leave blank
 }
 
 def normalize_merchant(raw_name):
@@ -98,7 +77,7 @@ def normalize_merchant(raw_name):
 
 def estimate_carbon_kg(category, total_dollars):
     """Spend-based estimate using EPA-style category factors.
-    Returns None (not a guess) when we don't have a defensible factor."""
+    Returns None when there's no defensible factor."""
     factor = CARBON_FACTORS_KG_PER_DOLLAR.get(category)
     if factor is None or total_dollars is None:
         return None
@@ -119,11 +98,6 @@ def safe_float(value, default=0.0):
 def extract_receipt_data(image_bytes):
     base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
-    # Note: we deliberately do NOT ask the model to estimate carbon here.
-    # A dollar total + merchant name isn't enough for it to ground that number in
-    # anything real — we calculate carbon ourselves from EPA spend-based factors
-    # after extraction (see estimate_carbon_kg). We do ask for a confidence flag
-    # on the category, so low-confidence entries can be routed to a human.
     prompt = """You are reading a receipt photo. Return ONLY a JSON object with these
     exact fields, no other text:
     {
@@ -163,8 +137,8 @@ def pdf_first_page_to_image_bytes(pdf_bytes):
 CATEGORIES = ["Groceries", "Dining", "Transportation", "Utilities",
               "Shopping", "Entertainment", "Health", "Travel", "Other"]
 
-# ---------------- The actual page ----------------
-st.title("🌿 Receipt Tracker")
+# The actual page
+st.title("Receipt Tracker")
 st.caption("Snap a receipt, review the details, and it's logged with an estimated carbon footprint.")
 
 if "uploader_key" not in st.session_state:
@@ -183,12 +157,6 @@ else:
 
 if photo is not None:
     raw_bytes = photo.getvalue()
-    # A hash of the actual bytes, not just the filename, so retaking the same
-    # shot twice or uploading two files with the same name doesn't collide,
-    # and — importantly — so we only call the API once per genuinely new photo,
-    # not on every keystroke elsewhere on the page (Streamlit reruns the whole
-    # script on every widget interaction; without this, editing the Notes
-    # field would silently re-trigger a fresh, billed Groq call each time).
     file_key = hashlib.md5(raw_bytes).hexdigest()
 
     if st.session_state.get("file_key") != file_key:
@@ -206,7 +174,7 @@ if photo is not None:
     data = st.session_state.extracted
     clean_merchant = st.session_state.clean_merchant
 
-    st.success("Here's what I found — edit anything that looks off:")
+    st.success("Here's what I found! Edit anything that looks off:")
 
     if data.get("category_confidence") == "low":
         st.warning("The model wasn't confident about the category on this one — "
@@ -293,6 +261,6 @@ try:
             hide_index=True,
         )
     else:
-        st.write("No entries yet — take a photo above to add your first one.")
+        st.write("No entries yet. Take a photo above to add your first one.")
 except Exception:
     st.write("Connect your sheet in secrets to see entries here.")
