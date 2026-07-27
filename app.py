@@ -4,9 +4,10 @@ from google.oauth2.service_account import Credentials
 from groq import Groq
 import json
 import base64
+import hashlib
 import fitz
 
-st.set_page_config(page_title="Tracker")
+st.set_page_config(page_title="Receipt Tracker", page_icon="🌿", layout="centered")
 
 # ---- Connect to Google Sheets (using the robot account) ----
 @st.cache_resource
@@ -104,8 +105,8 @@ def estimate_carbon_kg(category, total_dollars):
     return round(factor * total_dollars, 2)
 
 def safe_float(value, default=0.0):
-    """Parses totals that may come back as '$12.50' or '12,50' from the model."""
-    if value is None:
+    """Parses totals that may come back as '$12.50' or '12,50', or be blank."""
+    if value is None or value == "":
         return default
     if isinstance(value, (int, float)):
         return float(value)
@@ -163,26 +164,47 @@ CATEGORIES = ["Groceries", "Dining", "Transportation", "Utilities",
               "Shopping", "Entertainment", "Health", "Travel", "Other"]
 
 # ---------------- The actual page ----------------
-st.title("Tracker")
+st.title("🌿 Receipt Tracker")
+st.caption("Snap a receipt, review the details, and it's logged with an estimated carbon footprint.")
+
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
 
 capture_method = st.radio("How would you like to add a receipt?",
-                           ["Upload a photo", "Use camera"])
+                           ["Upload a photo", "Use camera"], horizontal=True)
 
 if capture_method == "Upload a photo":
     photo = st.file_uploader("Upload a receipt image or PDF",
-                              type=["jpg", "jpeg", "png", "pdf"])
+                              type=["jpg", "jpeg", "png", "pdf"],
+                              key=f"uploader_{st.session_state.uploader_key}")
 else:
-    photo = st.camera_input("Take a photo of your receipt")
+    photo = st.camera_input("Take a photo of your receipt",
+                             key=f"camera_{st.session_state.uploader_key}")
 
 if photo is not None:
-    with st.spinner("Reading receipt..."):
-        raw_bytes = photo.getvalue()
-        if photo.name.lower().endswith(".pdf"):
-            image_bytes = pdf_first_page_to_image_bytes(raw_bytes)
-        else:
-            image_bytes = raw_bytes
-        data = extract_receipt_data(image_bytes)
-        clean_merchant = normalize_merchant(data.get("merchant", "Unknown"))
+    raw_bytes = photo.getvalue()
+    # A hash of the actual bytes, not just the filename, so retaking the same
+    # shot twice or uploading two files with the same name doesn't collide,
+    # and — importantly — so we only call the API once per genuinely new photo,
+    # not on every keystroke elsewhere on the page (Streamlit reruns the whole
+    # script on every widget interaction; without this, editing the Notes
+    # field would silently re-trigger a fresh, billed Groq call each time).
+    file_key = hashlib.md5(raw_bytes).hexdigest()
+
+    if st.session_state.get("file_key") != file_key:
+        with st.spinner("Reading receipt..."):
+            if photo.name.lower().endswith(".pdf"):
+                image_bytes = pdf_first_page_to_image_bytes(raw_bytes)
+            else:
+                image_bytes = raw_bytes
+            extracted = extract_receipt_data(image_bytes)
+            st.session_state.file_key = file_key
+            st.session_state.extracted = extracted
+            st.session_state.clean_merchant = normalize_merchant(extracted.get("merchant", "Unknown"))
+            st.session_state.preview_bytes = image_bytes
+
+    data = st.session_state.extracted
+    clean_merchant = st.session_state.clean_merchant
 
     st.success("Here's what I found — edit anything that looks off:")
 
@@ -190,47 +212,60 @@ if photo is not None:
         st.warning("The model wasn't confident about the category on this one — "
                     "double-check it before saving.")
 
-    edited_merchant = st.text_input("Merchant", value=clean_merchant)
-    edited_date = st.text_input("Date (YYYY-MM-DD)", value=data.get("date", ""))
-    default_category = data.get("category", "Other")
-    edited_category = st.selectbox(
-        "Category",
-        CATEGORIES,
-        index=CATEGORIES.index(default_category) if default_category in CATEGORIES else 8
-    )
-    edited_total = st.number_input("Total ($)", value=safe_float(data.get("total")))
-    submitted_by = st.text_input("Your name *", value="",
-                                  help="Required — so the weekly digest can show who submitted what.")
-    notes = st.text_input("Notes (optional)", value="",
-                           placeholder="e.g. which program this supports, why it was purchased")
+    preview_col, form_col = st.columns([1, 1.3])
+    with preview_col:
+        st.image(st.session_state.preview_bytes, caption="What we read this from",
+                  use_container_width=True)
 
-    carbon_estimate = estimate_carbon_kg(edited_category, edited_total)
-    if carbon_estimate is not None:
-        st.caption(f"Estimated carbon: ~{carbon_estimate} kg CO2e "
-                    f"(spend-based estimate, {edited_category} category)")
-    else:
-        st.caption("No reliable carbon factor for this category yet — left blank rather than guessing.")
+    with form_col:
+        # Fields inside a form only trigger a rerun (and re-check the sheet
+        # headers) when Save is pressed — not on every keystroke.
+        with st.form("receipt_form"):
+            edited_merchant = st.text_input("Merchant", value=clean_merchant)
+            edited_date = st.text_input("Date (YYYY-MM-DD)", value=data.get("date", ""))
+            default_category = data.get("category", "Other")
+            edited_category = st.selectbox(
+                "Category",
+                CATEGORIES,
+                index=CATEGORIES.index(default_category) if default_category in CATEGORIES else 8
+            )
+            edited_total = st.number_input("Total ($)", value=safe_float(data.get("total")))
+            submitted_by = st.text_input("Your name *", value="",
+                                          help="Required — so the weekly digest can show who submitted what.")
+            notes = st.text_input("Notes (optional)", value="",
+                                   placeholder="e.g. which program this supports, why it was purchased")
 
-    name_missing = submitted_by.strip() == ""
-    if name_missing:
-        st.caption(":red[Enter your name above before saving.]")
+            carbon_estimate = estimate_carbon_kg(edited_category, edited_total)
+            if carbon_estimate is not None:
+                st.caption(f"Estimated carbon: ~{carbon_estimate} kg CO2e "
+                            f"(spend-based estimate, {edited_category} category)")
+            else:
+                st.caption("No reliable carbon factor for this category yet — left blank rather than guessing.")
 
-    sheet = get_sheet()
-    headers_ok = check_headers(sheet)
+            submit = st.form_submit_button("Save to sheet", use_container_width=True)
 
-    if st.button("Save to sheet", disabled=name_missing or not headers_ok):
-        sheet.append_row([
-            edited_date,
-            edited_merchant,
-            edited_category,
-            edited_total,
-            carbon_estimate if carbon_estimate is not None else "",
-            submitted_by.strip(),
-            data.get("payment_method", ""),
-            notes.strip(),
-            json.dumps(data),  # Raw Extract, our safety net
-        ])
-        st.success("Saved!")
+    if submit:
+        if submitted_by.strip() == "":
+            st.error("Enter your name before saving.")
+        else:
+            sheet = get_sheet()
+            if check_headers(sheet):
+                sheet.append_row([
+                    edited_date,
+                    edited_merchant,
+                    edited_category,
+                    edited_total,
+                    carbon_estimate if carbon_estimate is not None else "",
+                    submitted_by.strip(),
+                    data.get("payment_method", ""),
+                    notes.strip(),
+                    json.dumps(data),  # Raw Extract, our safety net
+                ])
+                st.success("Saved! Ready for the next receipt.")
+                for key in ["file_key", "extracted", "clean_merchant", "preview_bytes"]:
+                    st.session_state.pop(key, None)
+                st.session_state.uploader_key += 1
+                st.rerun()
 
 st.divider()
 st.subheader("Recent entries")
@@ -238,7 +273,25 @@ try:
     sheet = get_sheet()
     records = sheet.get_all_records()
     if records:
-        st.dataframe(records[-10:])
+        recent = records[-10:]
+        recent_spend = sum(safe_float(r.get("Total ($)")) for r in recent)
+        recent_carbon = sum(
+            safe_float(r.get("Est. Carbon (kg CO2)"))
+            for r in recent if r.get("Est. Carbon (kg CO2)") not in ("", None)
+        )
+        c1, c2 = st.columns(2)
+        c1.metric("Spend (last 10 entries)", f"${recent_spend:,.2f}")
+        c2.metric("Est. carbon (last 10 entries)", f"{recent_carbon:,.2f} kg CO2e")
+
+        st.dataframe(
+            recent,
+            column_config={
+                "Total ($)": st.column_config.NumberColumn(format="$%.2f"),
+                "Est. Carbon (kg CO2)": st.column_config.NumberColumn(format="%.2f kg"),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
         st.write("No entries yet — take a photo above to add your first one.")
 except Exception:
