@@ -1,0 +1,14 @@
+name: Keep Streamlit app awake
+
+on:
+  schedule:
+    # Runs every 6 hours — comfortably under the 12-hour sleep threshold
+    - cron: "0 */6 * * *"
+  workflow_dispatch: # lets you trigger it manually from the Actions tab too
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the app to register traffic
+        run: curl -sL --max-time 30 "https://expense-and-carbon-tracker-qnw8vchs2nksvnigae3nd5.streamlit.app/" || true
